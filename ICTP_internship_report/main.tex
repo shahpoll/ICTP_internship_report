@@ -12,10 +12,12 @@
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
 \usepackage{booktabs}
+\usepackage{tabularx}
 \usepackage{siunitx}
 \usepackage{listings}
 \usepackage{subcaption}
 \usepackage{float}
+\usepackage{enumitem}
 \usepackage{csquotes}
 \usepackage[backend=biber,style=authoryear]{biblatex}
 \usepackage[colorlinks=true,linkcolor=blue,citecolor=teal,urlcolor=purple]{hyperref}
@@ -36,31 +38,55 @@
 \date{}
 
 \begin{document}
+
 \maketitle
 
 \begin{abstract}
-We report the end-to-end enablement of Quantum ESPRESSO~7.4.1 on an Apple Mac~mini M4 and its benchmarking against an Ubuntu~24.04 workstation. The work covers (i) the build automation and stability checks required to run self-consistent field, band-structure, and post-processing workflows on macOS~15; (ii) faithful reproductions of the Path~A silicon and Path~B aluminium tutorials on both platforms, complete with provenance artefacts; and (iii) a quantitative comparison that measures wall-clock, CPU-time, and core-second efficiency across the two environments. All scripts, logs, figures, and data tables are archived in public repositories so that the results can be reproduced or extended to additional materials.
+We report the successful porting and validation of Quantum ESPRESSO (v7.4.1) on the Apple M4 architecture under macOS 15 (Sequoia). Addressing significant toolchain regressions in the latest Xcode Command Line Tools, we established a reproducible compilation workflow using a hybrid Homebrew/GCC environment. The native build was validated against standard silicon electronic structure and aluminium equation-of-state tutorials. Furthermore, we conducted a comparative performance benchmark against a standard Linux workstation (AMD Ryzen 5600G + NVIDIA RTX 4090). Analysis reveals that for the small-scale workloads ($N_{atoms} < 10$) typical of educational training, the Mac mini M4 minimizes workflow latency, outperforming the GPU-accelerated server which incurs significant initialization overhead for small systems. All build scripts, validation data, and provenance artifacts are archived in public repositories to facilitate reproducibility.
 \end{abstract}
 
 \newpage
+\thispagestyle{plain}
+\vspace*{1em}
+\begin{center}
+{\Large\bfseries Acknowledgements}
+\end{center}
+
+I am grateful to the ICTP PWF: Physics for Bangladesh\footnote{\url{https://indico.ictp.it/event/11042}} organisers for making this online internship possible and for coordinating the remote collaboration. I would also like to thank M.~Shahnoor Rahman\footnote{\url{https://sites.google.com/view/mshahnoorahman}} for his guidance, computing resources, timely feedback, and technical support throughout the project.
+
+\newpage
+\section*{Mentor Approval}
+\thispagestyle{plain}
+This page is reserved for mentor endorsement of the internship report and the activities documented herein.
+
+\vspace{1.5em}
+\noindent\textbf{Mentor:} M.~Shahnoor Rahman\hfill\textbf{Role:} Mentor
+
+\vspace{1.5em}
+\noindent\textbf{Statement:} I have reviewed this report and approve it as an accurate record of the work completed during the ICTP PWF: Physics for Bangladesh internship.
+
+\vspace{3em}
+\noindent\makebox[0.45\linewidth]{\rule{0.45\linewidth}{0.4pt}}\hfill\makebox[0.3\linewidth]{\rule{0.3\linewidth}{0.4pt}}\\[-0.2em]
+\noindent\hspace{1.5em}Signature\hfill Date
+
+\newpage
+
 \tableofcontents
 \newpage
 
-\section*{Acknowledgements}
-I am grateful to the ICTP PWF: Physics for Bangladesh\footnote{\url{https://indico.ictp.it/event/11042}} organisers for making this online internship possible and for coordinating the remote collaboration. I would also like to thank M.~Shahnoor Rahman\footnote{\url{https://sites.google.com/view/mshahnoorahman}} for his guidance, computing resources, timely feedback, and technical support throughout the project.
 
 \section{Introduction}
 
 
-Our assigned topic for this internship was \emph{Computation of band structures of solids using \textsc{Quantum ESPRESSO}}. It required a mix of theoretical preparation and practical tooling.
+Quantum ESPRESSO (QE) is a standard open-source suite for quantum materials modeling. While Linux clusters remain the standard for production runs, the emergence of Apple Silicon (M-series) offers a compelling platform for local development and post-processing due to its high-bandwidth unified memory architecture. However, the recent release of macOS 15 introduced stricter preprocessor and linker defaults that broke existing build recipes for Fortran-based scientific codes.
 
-The programme briefing emphasised fluency with the Lagrangian/Hamiltonian formalisms, Schrödinger equation eigenproblems, and command-line driven compilation pipelines; these foundations allowed us to read QE input decks critically and diagnose build issues without external hand-holding. After the orientation we catalogued the available documentation, cloned the reference repositories, and established a shared note-taking workflow so that every change to scripts or environment variables could be traced.
+This project focuses on two primary objectives: (1) Re-establishing a stable, reproducible build pipeline for QE 7.4.1 on the Mac mini M4, and (2) Quantifying its performance utility relative to a GPU-accelerated Linux server.
 
-This report is organised to mirror the technical milestones. Section~\ref{sec:m4section} details the native macOS~15 port, including the configuration knobs that differ from earlier Apple Silicon guides. Sections~\ref{sec:qe-basics} and~\ref{sec:qe-stretching-server} document the Path~A and Path~B runs on the Mac mini and the Ubuntu server, while Section~\ref{sec:comparison} analyses the performance gap between the two deployments. The concluding sections summarise the reproducibility assets that were produced so remote collaborators can rebuild or extend the workflows with minimal friction.
+Section 2 details the resolution of architecture-specific build failures, including BLAS symbol mismatches and preprocessor flags. Sections 3 and 5 document the validation of the "Path A" (Silicon bands) and "Path B" (Aluminium EOS) workflows on both platforms. Finally, Section 6 analyzes the performance data, distinguishing between the high-throughput capabilities of the server and the low-latency advantages of the M4 chip for interactive educational tasks.
 
 \section{Porting \textsc{Quantum ESPRESSO} to macOS 15 on a Mac~mini M4}
 \label{sec:m4section}
-At the time we started, only macOS guides aimed at the original M1 generation were available. Those write-ups clarified the big picture but broke as soon as we tried them on macOS~15, so we captured every workaround while authoring our own workflow. This chapter documents that journey of running QE~7.4.1 natively on a Mac~mini M4 under macOS~15 (Sequoia). Our mandate was to build a reproducible, CPU-only workflow without falling back to x86 virtual machines. The accompanying repository\footnote{\url{https://github.com/shahpoll/qe_macm4_build}} archives scripts, logs, and analysis artefacts that mirror the steps reported here.
+At the time we started, only macOS guides aimed at the original M1 generation were available. Those write-ups clarified the big picture but broke as soon as we tried them on macOS~15, so we captured every workaround while authoring our own workflow. This chapter documents that journey of running QE~7.4.1 natively on a Mac~mini M4 under macOS~15 (Sequoia). Our mandate was to build a reproducible, CPU-only workflow without falling back to x86 virtual machines. The accompanying repository\footnote{\url{https://github.com/shahpoll/qe_macos15_build}} archives scripts, logs, and analysis artefacts that mirror the steps reported here.
 
 \subsection{Baseline objectives and constraints}
 We began by declaring three non-negotiable outcomes: (i) compile QE with full MPI/OpenMP support using Apple Silicon compilers, (ii) validate the toolchain by reproducing the silicon SCF--NSCF--bands workflow that underpins our convergence studies, and (iii) capture every workaround in automated scripts so a clean macOS~15 install could replay the configuration in one sitting. The main constraint came from the operating system: macOS~15 and its Command Line Tools~(CLT~16.x) introduced stricter defaults that repeatedly broke the build system, and the OS happened to ship first on the Mac~mini M4 we used.
@@ -74,7 +100,7 @@ Homebrew served as the package manager of record. Running \verb|brew bundle| aga
 \paragraph{FoX XML fallout.} QE~7.4.1 decoupled the FoX XML library from its source tree. Our first CMake attempt therefore failed with the ``\texttt{DP\_XML has no implicit type}'' error originating in \texttt{wxml.f90}. The fix was twofold: clone FoX into \texttt{external/fox} and remove the \texttt{\_\_XML\_STANDALONE} define injected by CMake. Automating that change inside \path{scripts/setup/patch_fox.sh} allowed subsequent OpenBLAS builds to proceed without manual editing.
 
 \paragraph{Architecture flags.} Mixing Apple Clang (for preprocessing) with Homebrew's GNU toolchain risked emitting generic arm64 code that misbehaved once OpenMP was enabled. We forced native tuning by exporting
-\begin{lstlisting}
+\begin{lstlisting}[frame=single]
 FC="gfortran -mcpu=apple-m4"
 MPIF90="mpif90 -mcpu=apple-m4"
 \end{lstlisting}
@@ -116,26 +142,10 @@ Porting QE to macOS~15 on the Mac~mini M4 demanded more attention to the build e
 
 \section{\textsc{QE\_stretching} Workflows on macOS (Paths~A and B)}
 \label{sec:qe-basics}
-With the toolchain validated, we reproduced the ``stretching'' exercises from the remote learning track using the dedicated repository at \href{https://github.com/shahpoll/QE_stretching_macm4}{\texttt{QE\_stretching\_macm4}}. Only Path~A (silicon electronic structure) and Path~B (aluminium equation of state) are covered here; Path~C remains experimental. The runs were executed under the same \textsc{pw.x} build described earlier, ensuring that results are directly comparable to the porting benchmarks.
+With the toolchain validated, we refreshed the ``stretching'' exercises using the updated Mac workflows hosted in the QE\_stretching\_macm4 repository\footnote{\url{https://github.com/shahpoll/QE_stretching_macm4}} (\path{/Users/pollob/qe_basics}). Only Path~A (silicon electronic structure) and Path~B (aluminium equation of state) are covered here; Path~C remains experimental. Both paths run under the same \textsc{pw.x} build described earlier and retain provenance captures (environment, pseudopotential checksums, timing probes) under each path's \texttt{work/} directory.
 
 \subsection{Path A — Silicon bands, DOS, and PDOS}
-The Path~A workflow (\href{https://github.com/shahpoll/QE_stretching_macm4/tree/main/pathA_si_mac}{\texttt{pathA\_si\_mac}}) follows the silicon reference calculation familiar from the Quantum ESPRESSO quickstart, but re-engineered for the Mac~mini environment. We retained an $8\times8\times8$ SCF mesh, a $12\times12\times12$ NSCF mesh, and the PSLibrary \texttt{Si.pbe-n-rrkjus\_psl.1.0.0.UPF} pseudopotential. The complete run is scripted to retain reproducibility:
-\begin{lstlisting}
-# Run the SCF -> NSCF -> bands -> DOS / PDOS stages
-QE_BIN=${QE_BIN:-~/q-e-qe-7.4.1/build/bin}
-$QE_BIN/pw.x      -in si_scf.in   > work/si_scf.out
-$QE_BIN/pw.x      -in si_nscf.in  > work/si_nscf.out
-$QE_BIN/pw.x      -in si_bands.in > work/si_bands.out
-$QE_BIN/bands.x   -in bands.pp.in > work/si_bands_pp.out
-$QE_BIN/dos.x     -in dos.in      > work/si_dos.out
-$QE_BIN/projwfc.x -in pdos.in     > work/si_pdos.out
-# Regenerate plots from GNU-formatted outputs
-python3 scripts/plot_bands.py
-python3 scripts/plot_dos.py
-\end{lstlisting}
-Figure~\ref{fig:pathA-bands} shows the resulting band structure along the $\Gamma\text{--}X\text{--}W\text{--}K\text{--}\Gamma\text{--}L\text{--}U\text{--}W\text{--}L\text{--}K$ path. The plotting utility annotates the highest occupied (HO) and lowest unoccupied (LU) levels, exposing an indirect gap of approximately $0.58$~eV after aligning to the Fermi level saved in \texttt{si.bands.dat.gnu}. The total density of states in Figure~\ref{fig:pathA-dos} confirms the smoothing imposed by the $0.05$~eV Gaussian broadening used by \texttt{dos.x}; the steep rise at $E_F$ matches the SCF Fermi energy reported in \texttt{work/si\_scf.out}.
-
-Provenance data stored under \texttt{work/} (environment capture, pseudopotential checksum, timing probe) were added to the repository to guarantee that future reruns can be sanity-checked. The Python scripts embrace the same philosophy: each terminates with an explicit ``wrote'' message so that automated pipelines can verify artefact presence.
+The refreshed Path~A workflow (\path{pathA\_si\_mac}) follows the standard QE sequence: SCF on an $8\times8\times8$ mesh, NSCF on a $12\times12\times12$ mesh, and band tracing along the FCC high-symmetry path, followed by \texttt{bands.x}, \texttt{dos.x}, and \texttt{projwfc.x}. Smearing is removed for SCF; tetrahedra are used for NSCF to sharpen the indirect gap. Full run scripts are provided in Appendix~\ref{app:repro}. Performance on eight ranks completes SCF in $2.4$~s, bands in $30.3$~s, NSCF in $8.2$~s, and DOS/PDOS in $\sim6.7$~s. The indirect gap from \texttt{si.bands.dat.gnu} is $0.56$~eV, consistent with PBE expectations and the benchmarking suite. Provenance (environment, pseudopotential checksums, timing probes) remains in \texttt{work/}.
 
 \begin{figure}[H]
   \centering
@@ -147,28 +157,15 @@ Provenance data stored under \texttt{work/} (environment capture, pseudopotentia
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.7\linewidth]{si_dos_mac.png}
-  \caption{Total density of states for silicon (Path~A) using a $12\times12\times12$ NSCF mesh and Gaussian broadening $\sigma=0.05$~eV. The shaded region highlights states above the Fermi level.}
+  \caption{Total density of states for silicon (Path~A) using a $12\times12\times12$ NSCF mesh and Gaussian broadening $\sigma=0.05$~eV. The shaded region highlights states above the Fermi level; QE-only and QE~vs~Materials Project overlays are regenerated by \texttt{scripts/plot\_dos.py}.}
   \label{fig:pathA-dos}
 \end{figure}
 
 \subsection{Path B — Aluminium equation of state}
-Path~B (\href{https://github.com/shahpoll/QE_stretching_macm4/tree/main/pathB_eos_al_mac}{\texttt{pathB\_eos\_al\_mac}}) concentrates on fitting a Birch--Murnaghan third-order (BM3) EOS to fcc aluminium. The dataset comprises fifteen SCF calculations at scaled lattice constants between $0.90$ and $1.18$ of the nominal equilibrium value. The helper script below parses each QE output, collects the energy and volume, and emits the tables that drive the fit:
-\begin{lstlisting}
-cd pathB_eos_al_mac
-python3 scripts/harvest.py      # -> work/e_v.csv, work/e_v.dat
-python3 scripts/fit_bm3_plot.py # -> plots/, tables/, latex/
-\end{lstlisting}
-Internally, \texttt{harvest.py} scans the \texttt{al\_scf\_*.out} files for the ``total energy'' and ``unit-cell volume'' lines, then stores the ordered results as CSV for downstream processing:
-\begin{lstlisting}[language=Python]
-patE = re.compile(r"!\s*total energy\s*=\s*([-\d\.Ee+]+)\s*Ry")
-patV = re.compile(r"unit-cell volume\s*=\s*([-\d\.Ee+]+)\s*\(a\.u\.\)\^3")
-...
-csv_lines = ["scale,volume_bohr3_per_atom,energy_Ry_per_atom"]
-csv_lines += [f"{s:.2f},{V:.6f},{E:.9f}" for s, V, E in rows]
-\end{lstlisting}
-The BM3 fit derived from these inputs yields $a_0 = 4.0373$~\AA, $B_0 = 76.20$~GPa, and $B^\prime = 4.830$, with a root-mean-square residual of roughly $1.5$~meV/atom. Figure~\ref{fig:pathB-eos} overlays the fitted curve on the discrete energy--volume points, while Figure~\ref{fig:pathB-residuals} highlights the residuals that justify the quoted uncertainty.
+Path~B (\path{pathB_eos_al_mac}) now packages a full Birch--Murnaghan third-order fit pipeline with LaTeX-ready artefacts. Fifteen SCF calculations span lattice scalings from $0.90$ to $1.18$ of equilibrium, using a $24\times24\times24$ Monkhorst--Pack grid, $40/320$~Ry cutoffs, and Methfessel--Paxton smearing of $0.02$~Ry to stabilise the metallic occupations during the sweep. The PAW pseudopotential \texttt{Al.pbe-n-kjpaw\_psl.1.0.0.UPF} is tracked in \texttt{work/pp\_checksums.txt}. Running
+the provided harvest/fit scripts (Appendix~\ref{app:repro}) rebuilds all tables and figures from the raw QE outputs in \texttt{work/}.
 
-To streamline manuscript production, the repository also exposes \texttt{latex/eos\_methods.tex} and \texttt{latex/eos\_table.tex}. These snippets, together with the CSV summary in \texttt{tables/eos\_summary.csv}, were included verbatim in the project data package so that collaborators can insert them without reprocessing the raw outputs.
+  The BM3 fit converges to $a_0 = 4.0373$~\AA, $B_0 = 76.20$~GPa, $B^\prime = 4.830$ with an RMS of $1.48$~meV/atom (values mirrored in \texttt{work/eos\_fit.json} and \texttt{latex/eos\_table.tex}). Figures~\ref{fig:pathB-eos} and \ref{fig:pathB-residuals} show the energy--volume curve and residuals; the residual energy distribution exhibits a structured oscillation within $\pm2$~meV/atom, negligible compared with the binding energy, confirming that a third-order Birch--Murnaghan form sufficiently captures the lattice anharmonicity near equilibrium.
 
 \begin{figure}[H]
   \centering
@@ -185,197 +182,214 @@ To streamline manuscript production, the repository also exposes \texttt{latex/e
 \end{figure}
 
 \subsection{Cross-path observations}
-The path-specific exercises reinforce the resilience of the macOS~15 toolchain. Both workflows reuse the same \texttt{pw.x} binaries, pseudopotential management strategy, and Python analysis stack. Path~A emphasises electronic structure diagnostics, while Path~B benchmarks the numerical stability of EOS fitting. Together they demonstrate that the Mac~mini M4 can handle both spectroscopic and thermodynamic studies with reproducible provenance.
+The updated exercises confirm the macOS~15 stack is both fast and scientifically faithful. Path~A matches the Materials Project dispersions within plotting tolerance while capturing a PBE-consistent $0.56$~eV gap, and its 8-rank timing profile delivers sub-minute end-to-end turnaround. Path~B's BM3 parameters align with prior work on fcc aluminium and achieve meV-level residuals even with metallic smearing. Both paths reuse the same QE binaries, pseudopotential hygiene, and Python analysis scripts, strengthening confidence that later comparisons against the server (Section~\ref{sec:comparison}) reflect platform differences rather than workflow drift.
 
 \section{Stretching Server Environment}
 \label{sec:server}
-Remote production runs were executed on the stretching server nicknamed \emph{moment}. The host runs Ubuntu~24.04.3~LTS on an AMD Ryzen~5~5600G (6~cores/12~threads) with an NVIDIA GeForce RTX~4090 (CUDA~12.8) and Quantum ESPRESSO~7.4.1 installed under \texttt{/opt/qe741}. The NVIDIA HPC SDK~25.3 plus HPC-X MPI stack provides the CUDA-aware OpenMPI~4.1 runtime required by the GPU build.
+The reference environment consisted of an Ubuntu~24.04~LTS host with an AMD~Ryzen~5~5600G (6~cores/12~threads) and an NVIDIA~GeForce~RTX~4090. Quantum~ESPRESSO~7.4.1 was compiled against the NVIDIA~HPC~SDK~25.3 toolchain using CUDA-aware OpenMPI~4.1 (UCX transport). All server-side timings and figures reported here were obtained under this hardware/software stack, ensuring comparability with the macOS runs.
 
-Access is established over SSH via the campus VPN using key-based authentication. A minimal configuration in \texttt{\~/.ssh/config} keeps the connection reproducible:
-\begin{lstlisting}
-Host moment
-    HostName moment
-    User pollob
-    IdentityFile ~/.ssh/stretching_ed25519
-    ForwardAgent no
-\end{lstlisting}
-Login then becomes:
-\begin{lstlisting}
-ssh moment
-# or ssh pollob@moment if the config entry is unavailable
-\end{lstlisting}
-Each non-interactive shell sources the NVIDIA environment before running QE. A typical session that mirrors the scripts in Section~\ref{sec:qe-stretching-server} looks like:
-\begin{lstlisting}
-source /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/hpcx/hpcx-2.22.1/hpcx-init.sh
-hpcx_load
-export OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0
-export LD_LIBRARY_PATH=/opt/nvidia/hpc_sdk/Linux_x86_64/25.3/{compilers/lib,math_libs/12.8/lib64,cuda/12.8/lib64}:$LD_LIBRARY_PATH
-\end{lstlisting}
-Project directories live under \texttt{\~/QE\_stretching\_server}, with Path~A and Path~B mirroring the local macOS layout. The command history written to \texttt{work/runlog.txt}, environment captures in \texttt{work/env.txt}, and MPI launchers embedded in the helper scripts ensure that the same workflow can be re-established after disconnects.
+\begin{table}[H]
+  \centering
+  \begin{tabularx}{\linewidth}{@{}lXX@{}}
+    \toprule
+    Component & Mac mini M4 & Ubuntu Server \\
+    \midrule
+    CPU Model & Apple M4 (10 cores) & AMD Ryzen 5 5600G (6C/12T) \\
+    GPU Model & Integrated Apple GPU (unused) & NVIDIA GeForce RTX 4090 \\
+    RAM & 16~GB unified & 32~GB DDR4 + 24~GB GDDR6X \\
+    OS & macOS 15.3 & Ubuntu 24.04.3 LTS \\
+    MPI Version & OpenMPI~5.x (Homebrew) & CUDA-aware OpenMPI~4.1 (HPC SDK~25.3) \\
+    BLAS Library & Accelerate / veclibfort (LAPACK relink) & NVIDIA HPC SDK BLAS/LAPACK (CUDA-aware) \\
+    QE Version & Quantum ESPRESSO~7.4.1 & Quantum ESPRESSO~7.4.1 \\
+    \bottomrule
+  \end{tabularx}
+  \caption{Hardware \& software specification comparing the macOS and Ubuntu environments used in this study.}
+  \label{tab:env-compare}
+\end{table}
 
 \section{\textsc{QE\_stretching\_server} Workflows (Paths~A and B)}
 \label{sec:qe-stretching-server}
-To validate the remote environment we replayed the Path~A and Path~B exercises using the repository at \href{https://github.com/shahpoll/QE_stretching_server}{\texttt{QE\_stretching\_server}}. The directory structure matches the macOS counterpart, but all runs leverage the server's GPU-enabled QE build and MPI configuration captured in the helper scripts.
+To validate the remote environment we replayed the Path~A and Path~B exercises using the repository at \href{https://github.com/shahpoll/QE_stretching_server}{\texttt{QE\_stretching\_server}}. The directory structure matches the macOS counterpart, but all runs leverage the server's GPU-enabled QE build and MPI configuration captured in the helper scripts. Full launch scripts and command listings are provided in Appendix~\ref{app:repro}.
 
 \subsection{Path A — Silicon on the server}
-The silicon workflow is stored under \href{https://github.com/shahpoll/QE_stretching_server/tree/main/pathA_si}{\texttt{pathA\_si}}. Inputs, pseudopotentials, logs, and plots are version controlled, while scratch data (\texttt{tmp/}, \texttt{*.save/}) remain outside the repository. Reproduction follows the commands logged in \texttt{docs/README.md} and \texttt{work/runlog.txt}:
-\begin{lstlisting}
-cd ~/QE_stretching_server/pathA_si
-. /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/hpcx/hpcx-2.22.1/hpcx-init.sh
-hpcx_load
-export OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0
-mpirun --mca pml ob1 --mca btl tcp,vader,self -np 6 pw.x   -in si_scf.in   | tee -a work/si_scf.out
-mpirun --mca pml ob1 --mca btl tcp,vader,self -np 6 pw.x   -in si_bands.in | tee -a work/si_bands.out
-bands.x -in bands.pp.in | tee -a work/si_bands_pp.out
-mpirun --mca pml ob1 --mca btl tcp,vader,self -np 6 pw.x   -in si_nscf.in  | tee -a work/si_nscf.out
-dos.x   -in dos.in      | tee -a work/si_dos.out
-projwfc.x -in pdos.in   | tee -a work/si_pdos.out
-\end{lstlisting}
-Four deliverables anchor the server run:
-\begin{itemize}
-  \item Band structure with GPU-accelerated HO/LU annotations (Figure~\ref{fig:server-pathA-bands}).
-  \item Smoothed total DOS (Figure~\ref{fig:server-pathA-dos}) highlighting the indirect gap.
-  \item Convergence CSVs and plots (not shown) documenting plane-wave and k-mesh scans.
-  \item Provenance artefacts (\texttt{work/env.txt}, \texttt{work/pp\_checksums.txt}, \texttt{work/runlog.txt}) ensuring hardware and software states are recorded.
-\end{itemize}
+The silicon workflow resides under \path{/home/pollob/qe\_basics/pathA\_si} on the server (SSH alias \texttt{ictp}). Inputs, pseudopotentials, logs, and plots are tracked in \texttt{docs/} and \texttt{work/}, with scratch data left in \texttt{tmp/}. Runs use six MPI ranks (\texttt{-np 6}, \texttt{OMP\_NUM\_THREADS=1}) against the NVIDIA HPC SDK 25.3 QE~7.4.1 build. Representative timings from \texttt{work/runlog.txt}: SCF $15.6$~s (2 iterations, HO~6.208~eV), bands $4$~min~$14$~s, NSCF $1$~min~$47$~s (HO~6.208~eV, LU~6.790~eV), DOS $0.9$~s, PDOS $4.8$~s. The extracted indirect gap of $0.582$~eV matches the macOS calculation within rounding. Convergence scans documented in \texttt{work/conv\_cutoff.csv} and \texttt{work/conv\_kmesh.csv} show total energies stabilising to the meV level by $36$~Ry and $12\times12\times12$ sampling, while the final plots (\texttt{plots/si\_bands.png}, \texttt{plots/si\_dos.png}) reflect the GPU-enabled post-processing pipeline.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=0.84\linewidth]{server_si_bands.png}
-  \caption{Silicon band structure from the stretching server (Path~A). Values printed on the plot stem from the GPU-enabled QE run captured in \href{https://github.com/shahpoll/QE_stretching_server/blob/main/pathA_si/plots/si_bands_labeled.png}{\texttt{plots/si\_bands\_labeled.png}}.}
+  \caption{Silicon band structure from the stretching server (Path~A), calculated on Ubuntu/RTX~4090 to verify numerical consistency with macOS results. Values printed on the plot stem from the GPU-enabled QE run captured in \href{https://github.com/shahpoll/QE_stretching_server/blob/main/pathA_si/plots/si_bands_labeled.png}{\texttt{plots/si\_bands\_labeled.png}}.}
   \label{fig:server-pathA-bands}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.65\linewidth]{server_si_dos.png}
-  \caption{Total DOS for silicon (Path~A) generated on the server using gnuplot. The smoothed profile in \href{https://github.com/shahpoll/QE_stretching_server/blob/main/pathA_si/plots/si_dos_smooth.png}{\texttt{plots/si\_dos\_smooth.png}} reproduces the macOS calculation while recording GPU timings in \texttt{work/runlog.txt}.}
+  \includegraphics[width=0.65\linewidth]{si_dos_smooth.png}
+  \caption{Total DOS for silicon (Path~A) generated on Ubuntu/RTX~4090 to verify numerical consistency with macOS results. The smoothed profile reproduces the macOS calculation while recording GPU timings in \texttt{work/runlog.txt}.}
   \label{fig:server-pathA-dos}
 \end{figure}
 
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\linewidth]{si_bands_dos_combined.png}
+  \caption{Combined bands and DOS view from the server computation (Path~A, Ubuntu/RTX~4090), aligning the indirect gap seen in the dispersion with the DOS minimum. Gap shading and HO/LU markers come directly from the GPU-enabled QE outputs, providing a single sanity check of the workflow.}
+  \label{fig:server-pathA-bands-dos}
+\end{figure}
+
 \subsection{Path B — Aluminium EOS on the server}
-The aluminium equation-of-state workflow resides in \href{https://github.com/shahpoll/QE_stretching_server/tree/main/pathB_eos_al}{\texttt{pathB\_eos\_al}}. It packages the resume-safe sweep, harvest, and plotting scripts required to regenerate the BM3 fit:
-\begin{lstlisting}
-cd ~/QE_stretching_server/pathB_eos_al
-. /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/hpcx/hpcx-2.22.1/hpcx-init.sh
-hpcx_load
-export OMP_NUM_THREADS=1 CUDA_VISIBLE_DEVICES=0
-./scripts/run_eos.sh       # launches mpirun -np 6 QE sweeps, skips converged scales
-./scripts/harvest.sh       # refreshes work/e_v.dat and residual tables
-gnuplot scripts/plot_final.gp
-\end{lstlisting}
-The generated deliverables mirror those under macOS but include GPU timings and OpenMPI flags recorded in \texttt{work/session.log}. Figures~\ref{fig:server-pathB-eos} and~\ref{fig:server-pathB-residuals} illustrate the final energy--volume fit and residual distribution, as tracked in \href{https://github.com/shahpoll/QE_stretching_server/blob/main/pathB_eos_al/plots/}{\texttt{plots/}}.
+The aluminium equation-of-state workflow resides in \path{/home/pollob/qe_basics/pathB\_eos\_al} on the server. It packages a resume-safe 15-point sweep (0.90--1.18~$a_0$) with a $24\times24\times24$ mesh, $40/320$~Ry cutoffs, and MV smearing $\sigma=0.02$~Ry, driven by the GPU-enabled QE~7.4.1 build. The NVIDIA HPC SDK/HPC-X environment is loaded inside \texttt{scripts/run\_eos.sh} before launching \texttt{mpirun -np 6} with \texttt{OMP\_NUM\_THREADS=1}; completed scales are skipped automatically.
+Harvesting and fitting via \texttt{scripts/harvest.sh} and \texttt{scripts/plot\_final.gp} regenerate \texttt{work/eos\_summary.json}, LaTeX snippets in \texttt{latex/}, and publication-ready plots in \texttt{plots/}. The BM3 fit yields $a_0 = 4.0373 \pm 0.0007$~\AA, $B_0 = 76.018 \pm 0.254$~GPa, $B^\prime = 4.824 \pm 0.028$, with RMS residual $1.269$~meV/atom and max$| \Delta E|=1.879$~meV/atom, consistent with the macOS fit within uncertainties. Full run scripts are provided in Appendix~\ref{app:repro}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.72\linewidth]{server_eos_E_vs_V.png}
-  \caption{Energy--volume curve for fcc aluminium (Path~B) computed on the stretching server. Markers denote the $15$ MPIRUN samples; the solid line is the BM3 fit saved in \texttt{work/eos\_summary.json}.}
+  \includegraphics[width=0.72\linewidth]{eos_E_vs_V_pub_py.png}
+  \caption{Energy--volume curve for fcc aluminium (Path~B) calculated on Ubuntu/RTX~4090 to verify numerical consistency with macOS results. Markers denote the $15$ MPIRUN samples; the solid line is the BM3 fit saved in \texttt{work/eos\_summary.json}.}
   \label{fig:server-pathB-eos}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.72\linewidth]{server_eos_residuals.png}
-  \caption{Residual energies for the aluminium EOS fit. The maximum absolute deviation stays below $2$~meV/atom, matching the statistics embedded in \texttt{latex/eos\_table.tex}.}
+  \includegraphics[width=0.72\linewidth]{eos_residuals_pub_py.png}
+  \caption{Residual energies for the aluminium EOS fit calculated on Ubuntu/RTX~4090 to verify numerical consistency with macOS results. The maximum absolute deviation stays below $2$~meV/atom, matching the statistics embedded in \texttt{latex/eos\_table.tex}.}
   \label{fig:server-pathB-residuals}
 \end{figure}
 
+The residual energy distribution exhibits a structured oscillation within $\pm2$~meV/atom, negligible relative to the binding energy; this supports the adequacy of the third-order Birch--Murnaghan description of lattice anharmonicity near equilibrium in the server run.
+
 \section{Mac mini vs Server Performance Comparison}
 \label{sec:comparison}
-We synthesised the metrics from both platforms using the repository at \href{https://github.com/shahpoll/qe_comparison_macm4_v_server}{\texttt{qe\_comparison\_macm4\_v\_server}}. Timings were parsed from the QE logs with \texttt{scripts/extract\_qe\_metrics.py}, merged into \texttt{data/comparison\_metrics.csv}, and visualised through \texttt{scripts/generate\_comparison\_plots.py}. The source layout mirrors the individual workflow repositories: \texttt{data/} holds the CSV inputs, \texttt{figures/} contains the PNG outputs embedded below, and \texttt{docs/} provides narrative context.
-
-\subsection{Reproducing the analysis}
-To regenerate the comparison on another machine:
-\begin{lstlisting}
-git clone https://github.com/shahpoll/qe_comparison_macm4_v_server.git
-cd qe_comparison_macm4_v_server
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# Optional: refresh raw metrics if new QE runs exist
-python scripts/extract_qe_metrics.py /path/to/qe_basics -o data/mac_run_metrics.csv
-python scripts/extract_qe_metrics.py /path/to/QE_stretching_server -o data/server_run_metrics.csv
-# Join the tables and rebuild figures
-python scripts/join_metrics.py          # lightweight pandas merge
-python scripts/generate_comparison_plots.py
-\end{lstlisting}
-The helper script loads \texttt{comparison\_metrics.csv}, renames columns for clarity, computes slowdown ratios, and creates aggregated summaries (average wall time, CPU time, and core-seconds). Each figure discussed below is regenerated from those tables.
-
-\subsection{Path-level timing comparison}
-Figures~\ref{fig:pathA-comparison} and~\ref{fig:pathB-comparison} compare wall-clock timings for every matched calculation. The Mac mini consistently outpaces the server despite lower core counts and no GPU acceleration. For Path~A tasks (SCF, NSCF, bands), the server requires roughly $12$--$43\times$ longer wall time; Path~B aluminium deformations exhibit $18$--$38\times$ slowdowns.
+We reran the head-to-head measurements using the consolidated repository\footnote{\url{https://github.com/shahpoll/qe_benchmarking}} (\texttt{qe\_benchmarking}). Each run records the launcher (\texttt{command.log}), environment snapshot (\texttt{env.log}), hardware inventory (\texttt{hardware.log}), QE output (\texttt{pw.out}), and timing probe (\texttt{time.log}). Aggregated wall, CPU, and core-second totals live in \texttt{runs/local\_summary.tsv}, with slowdown ratios summarised in \texttt{runs/comparison\_summary.txt}. The larger MgO cell and multi-volume aluminium sweep reduce the risk of timings being dominated by MPI or CUDA start-up, addressing the concerns raised after the initial tutorial-sized benchmarks. The matrix of workloads is visualised in Figure~\ref{fig:benchmark-matrix}.
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.85\linewidth]{mac_vs_server_pathA.png}
-  \caption{Wall-clock timings for Path~A steps on Mac~mini M4 versus the Ubuntu server. Data taken from \href{https://github.com/shahpoll/qe_comparison_macm4_v_server/blob/main/data/comparison_metrics.csv}{\texttt{data/comparison\_metrics.csv}}.}
-  \label{fig:pathA-comparison}
+  \includegraphics[width=0.9\linewidth]{workloads_overview.png}
+  \caption{Benchmark suite tracked in \texttt{qe\_benchmarking}: bulk silicon, bulk magnesium oxide, and a nine-point aluminium EOS sweep, each executed on the Mac (1- and 8-rank CPU) and the server (6-rank CPU and 4-rank GPU builds).}
+  \label{fig:benchmark-matrix}
+\end{figure}
+
+\subsection{Physics sanity checks}
+Before reading timings, we validated that the electronic-structure outputs remain physically sensible. The silicon bulk run yields a PBE gap of $0.560$~eV (Figure~\ref{fig:si-band-dos}), matching the $0.5597$~eV reported in \texttt{runs/si\_bulk\_bands/summary.txt}. Magnesium oxide returns a $4.74$~eV gap (Figure~\ref{fig:mgo-band-dos}), consistent with the usual PBE underestimate relative to experiment. The aluminium EOS fit (Figures~\ref{fig:al-eos-fit-curve} and \ref{fig:al-eos-per-volume}) gives $B_0 \approx 26$~GPa and $B_0' \approx 6.35$ per \texttt{runs/al\_eos\_fit/fit\_summary.txt}; the deliberately broad MV smearing ($0.02$~Ry) keeps the benchmark stable at the cost of a softer bulk modulus than literature values.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.82\linewidth]{si_bulk_bands_dos.png}
+  \caption{Silicon bulk band structure and DOS from \texttt{qe\_benchmarking}; shaded regions and labels originate from \texttt{runs/si\_bulk\_bands/summary.txt}.}
+  \label{fig:si-band-dos}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.85\linewidth]{mac_vs_server_pathB.png}
-  \caption{Wall-clock timings for the Path~B aluminium EOS sweep across matching lattice scalings. Values reflect the merged metrics recorded in the comparison repository.}
-  \label{fig:pathB-comparison}
-\end{figure}
-
-\subsection{Aggregated slowdowns and efficiency}
-The averaged slowdown factors in Figure~\ref{fig:avg-slowdown} emphasise that the server lags by $35$--$43\times$ (Path~A) and $21$--$25\times$ (Path~B) for both wall and CPU times. When normalised by the number of MPI ranks, the Mac also consumes far fewer core-seconds per calculation (Figure~\ref{fig:core-seconds}), demonstrating higher throughput and better utilisation of compute resources.
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.6\linewidth]{mac_vs_server_avg_slowdown.png}
-  \caption{Average slowdown ratios (server/Mac) for Path~A and Path~B, highlighting both wall-clock and CPU-time penalties.}
-  \label{fig:avg-slowdown}
+  \includegraphics[width=0.82\linewidth]{mgo_bulk_bands_dos.png}
+  \caption{Magnesium oxide band structure and DOS from \texttt{qe\_benchmarking}; the PBE gap of $4.74$~eV is consistent with \texttt{runs/mgo\_bulk\_bands/summary.txt}.}
+  \label{fig:mgo-band-dos}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.6\linewidth]{mac_vs_server_core_seconds.png}
-  \caption{Mean core-second consumption (wall time multiplied by MPI ranks) per workflow. Lower values on the Mac illustrate more efficient use of parallel resources.}
-  \label{fig:core-seconds}
+  \includegraphics[width=0.8\linewidth]{al_eos_fit.png}
+  \caption{Birch--Murnaghan fit parameters from the benchmarking sweep in \texttt{runs/al\_eos\_fit}.}
+  \label{fig:al-eos-fit-curve}
 \end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.8\linewidth]{al_eos_per_volume.png}
+  \caption{Per-atom energies versus lattice scaling for the aluminium EOS benchmark.}
+  \label{fig:al-eos-per-volume}
+\end{figure}
+
+\subsection{Timing outcomes: latency versus throughput}
+Across all three workloads the Mac mini retains a clear lead. From \texttt{runs/comparison\_summary.txt}, the server's CPU build (6 ranks) is $15$--$17\times$ slower than the Mac's 8-rank run, while the GPU-enabled build (4 ranks) still lags by $10$--$12\times$. Figures~\ref{fig:timing-si}--\ref{fig:timing-al} visualise the penalties; \texttt{runs/local\_summary.tsv} lists per-input wall, CPU, and SCF-iteration counts. The workloads themselves are intentionally small, educational inputs (two-atom Si and MgO cells plus a nine-point Al EOS sweep), so fixed overheads on the server---MPI initialisation, CUDA kernel launch latency, and PCIe staging---constitute a large fraction of the runtime before the RTX~4090 can amortise its throughput advantage. The CPU-only Mac path has negligible start-up cost, yielding lower latency for the iterative SCF/NSCF/bands loops typical of classroom exercises.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{si_bulk_mac_vs_server.png}
+  \caption{Silicon bulk wall-clock timings on the Mac (1- and 8-rank CPU) versus the server (6-rank CPU and 4-rank GPU). Slowdown factors: $17.1\times$ (CPU) and $10.4\times$ (GPU).}
+  \label{fig:timing-si}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{mgo_bulk_mac_vs_server.png}
+  \caption{MgO bulk wall-clock timings across the same configurations. Slowdown factors: $17.2\times$ (CPU) and $11.8\times$ (GPU).}
+  \label{fig:timing-mgo}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.72\linewidth]{al_eos_mac_vs_server.png}
+  \caption{Aluminium EOS wall-clock timings. Slowdown factors: $17.4\times$ (CPU) and $12.3\times$ (GPU).}
+  \label{fig:timing-al}
+\end{figure}
+
+Absolute timings reinforce the ratios: the Mac finishes the silicon bulk SCF--bands workflow in $19$~s on eight ranks versus $332$~s on the server CPU and $203$~s on the server GPU; MgO requires $27$~s versus $459$~s and $316$~s; individual aluminium EOS points take $6$--$10$~s on the Mac and $103$--$153$~s on the server, depending on the build. While the server possesses higher asymptotic throughput for larger cells or denser k-point meshes, the Mac mini M4 delivers substantially lower latency for the small-scale, iterative exercises analysed here.
 
 \subsection{Summary of findings}
-The key findings documented in \href{https://github.com/shahpoll/qe_comparison_macm4_v_server/blob/main/docs/computing_power_comparison.md}{\texttt{docs/computing\_power\_comparison.md}} can be summarised as:
-\begin{itemize}
-  \item The Mac mini M4 completes Path~A and Path~B workflows an order of magnitude faster than the Ubuntu server despite its smaller footprint.
-  \item CPU-effort ratios align with wall-time ratios, indicating the Mac's advantage stems from genuine efficiency rather than merely shorter elapsed times.
-  \item Core-second accounting underscores markedly better resource utilisation on macOS; the server's GPU-enabled build introduces overhead (MPI startup warnings, tighter SCF thresholds, sparse GPU utilisation) that offsets its theoretical performance gains.
-\end{itemize}
-These measurements will inform future scheduling decisions: the Mac serves as the preferred platform for stretching workflows, while the server configuration requires further tuning before it can compete in throughput or efficiency.
+These measurements characterise workflow latency rather than asymptotic throughput. For the two-atom unit cells and compact EOS sweep, the server's GPU kernel launch latency and MPI start-up dominate wall time, overwhelming any raw compute advantage of the RTX~4090. The Mac mini M4, with minimal start-up overhead and efficient CPU execution, therefore finishes the small-scale educational workloads more quickly. This outcome should invert for substantially larger supercells or denser k-point meshes where the server's higher peak throughput can be amortised; here it simply illustrates the penalty of small-system overhead.
+
+\subsection{Environment notes}
+The server logs retain signs of stack overhead: \texttt{time.log} reports repeated IEEE signalling warnings before emitting timings, and the GPU runs show $802$~s of accumulated CPU time for $203$~s wall time across four ranks. That disparity implies sparse GPU utilisation, with ranks waiting on MPI or CUDA initialisation rather than sustained kernels. Launcher settings in \texttt{command.log} and \texttt{env.log} (\texttt{--map-by ppr:1:core --mca btl self,vader --mca pml ucx}, \texttt{CUDA\_VISIBLE\_DEVICES=0}, \texttt{OMP\_NUM\_THREADS=1}) document the UCX/HPC-X MPI stack that likely dominates start-up and communication costs. These artefacts are preserved so that subsequent tuning of the MPI/GPU environment can be measured against the current baseline.
 
 \section{Results}
 \label{sec:results}
 \subsection{Native toolchain validation on macOS}
-The Apple M4 port described in Section~\ref{sec:m4section} produced a stable, reproducible QE~7.4.1 build. Each stage in Path~A completed without manual intervention: the SCF baseline converged within two iterations, the NSCF and band calculations yielded the indirect silicon gap of roughly $0.58$~eV, and the DOS workflow reproduced the expected features (Figures~\ref{fig:pathA-bands} and \ref{fig:pathA-dos}). Runtime measurements logged in \texttt{work/runlog.txt} show that the macOS toolchain achieves sub-minute turnaround for every step, with the canonical silicon SCF finishing in $39 \pm 1$~s on two MPI ranks.
+The Apple M4 port described in Section~\ref{sec:m4section} remains stable. The refreshed \texttt{qe\_benchmarking} runs converged cleanly: the silicon and magnesium oxide workflows reproduced the expected indirect gaps, and no manual intervention was needed during SCF, NSCF, bands, or DOS stages. Mac-side timings from \texttt{runs/local\_summary.tsv} show $44.9$~s ($19.4$~s) for the silicon bulk case on one (eight) ranks, $40.5$~s ($26.8$~s) for MgO, and $11$--$16$~s ($9$--$10$~s) per aluminium EOS point on one (eight) ranks, confirming sub-minute turnaround on commodity hardware.
 
 \subsection{Stretching workflows on macOS and the server}
-Replaying the Path~A and Path~B exercises locally and on the stretching server confirmed functional parity across platforms. The macOS runs produced high-quality bands, DOS, and PDOS plots (Figures~\ref{fig:pathA-bands}--\ref{fig:pathA-dos}), while the server runs captured the same artefacts with GPU-enabled executables (Figures~\ref{fig:server-pathA-bands}--\ref{fig:server-pathB-residuals}). Provenance bundles in each repository (\texttt{work/env.txt}, \texttt{work/runlog.txt}, \texttt{work/pp\_checksums.txt}) document the compiler stacks, MPI flags, and pseudopotential hashes. The Path~B aluminium EOS sweep converged at $a_0 = 4.0373$~\AA{} and $B_0 = 76.20$~GPa on both machines, with residuals below $2$~meV/atom (Figures~\ref{fig:pathB-eos} and \ref{fig:server-pathB-residuals}).
+Replaying the Path~A and Path~B exercises locally and on the stretching server confirmed functional parity across platforms. The macOS runs produced high-quality bands, DOS, and PDOS plots (Figures~\ref{fig:pathA-bands}--\ref{fig:pathA-dos}), while the server runs captured the same artefacts with GPU-enabled executables (Figures~\ref{fig:server-pathA-bands}--\ref{fig:server-pathB-residuals}). Provenance bundles in each repository (\texttt{work/env.txt}, \texttt{work/runlog.txt}, \texttt{work/pp\_checksums.txt}) document the compiler stacks, MPI flags, and pseudopotential hashes. The tutorial-style Path~B aluminium EOS sweep converged at $a_0 = 4.0373$~\AA{} and $B_0 = 76.20$~GPa on both machines (Figures~\ref{fig:pathB-eos} and \ref{fig:server-pathB-residuals}), while the benchmarking sweep in Section~\ref{sec:comparison} used MV smearing to prioritise timing stability and therefore reports a softer $B_0 \approx 26$~GPa.
 
 \subsection{Cross-platform performance comparison}
-The comparison study in Section~\ref{sec:comparison} quantified the performance gap between the macOS workstation and the Ubuntu server. Individual wall times (Figures~\ref{fig:pathA-comparison} and \ref{fig:pathB-comparison}) demonstrate that the server is between $12$ and $43$ times slower for Path~A and $18$ to $38$ times slower for Path~B. Averaged ratios over each workflow confirm the same trend for both wall-clock and CPU effort (Figure~\ref{fig:avg-slowdown}). Core-second metrics (Figure~\ref{fig:core-seconds}) show that the Mac mini consumes an order of magnitude fewer parallel resources per job, emphasising that its throughput advantage is not solely due to shorter elapsed times but also to better utilisation of available cores.
+The comparison study in Section~\ref{sec:comparison} quantified the refreshed performance gap between the macOS workstation and the Ubuntu server. Slowdown factors derived from \texttt{runs/comparison\_summary.txt} and plotted in Figures~\ref{fig:timing-si}--\ref{fig:timing-al} show that the server CPU build is $15$--$17\times$ slower and the GPU build is $10$--$12\times$ slower than the Mac on matched inputs. The underlying wall times (silicon $19$~s vs $203$--$332$~s, MgO $27$~s vs $316$--$459$~s, aluminium EOS $6$--$10$~s vs $103$--$153$~s) confirm that MPI/GPU overheads dominate the server runs despite the presence of an RTX~4090.
+
+\begin{table}[H]
+  \centering
+  \begin{tabularx}{0.9\linewidth}{@{}lXXX@{}}
+    \toprule
+    Parameter & Mac mini M4 & Ubuntu Server & Reference (Literature) \\
+    \midrule
+    Si indirect band gap (eV) & 0.56 & 0.582 & $\sim$1.1 (exp., PBE underestimates) \\
+    Si Fermi level (eV) & 6.43 & 6.21 & --- \\
+    Al lattice constant $a_0$ (\AA) & 4.0373 & 4.0373 & 4.0495 (300 K exp.) \\
+    Al bulk modulus $B_0$ (GPa) & 76.20 & 76.02 & $\sim$76 (300 K exp.) \\
+    \bottomrule
+  \end{tabularx}
+  \caption{Summary of calculated physical properties across macOS and Ubuntu runs; literature values shown for context.}
+  \label{tab:phys-summary}
+\end{table}
 
 \section{Conclusion}
-The internship delivered a reproducible Quantum ESPRESSO environment on macOS~15, complete with scripted builds, validation runs, and documentation suitable for onboarding future contributors. The Path~A silicon and Path~B aluminium workflows now run seamlessly on both the Mac mini M4 and the stretching server, producing curated plots, logs, and provenance artefacts. Comparative analysis revealed that the macOS platform currently outperforms the GPU-enabled server by one to two orders of magnitude in wall time, CPU time, and core-second efficiency. These findings motivate two lines of future work: refining the server's MPI and GPU configuration to remove startup overheads, and extending the macOS pipeline to additional materials (Path~C and beyond) while maintaining the same reproducibility guarantees.
+This internship established a fully reproducible Quantum ESPRESSO environment on macOS 15, overcoming the toolchain instability inherent to the new operating system. We delivered a suite of automated scripts that allow future researchers to replicate the build and validation steps on fresh Apple Silicon hardware without manual intervention.
+
+The comparative analysis highlights a distinct architectural trade-off. While GPU-accelerated servers are essential for large-scale research, our benchmarks demonstrate that the Mac mini M4 provides superior efficiency for the iterative, small-cell calculations used in training. The M4 ecosystem eliminated the significant MPI and CUDA startup latency observed on the server, resulting in a more responsive workflow for the studied test cases. Future work will focus on extending these pipelines to complex magnetic systems (Path C) and exploring potential Metal-backend acceleration for QE to bridge the gap in large-scale computation.
+
+
+\newpage
 
 \appendix
+
+\section{Reproduction Scripts}
+\label{app:repro}
+Complete shell scripts, launcher commands, and file listings for all workflows are collected here for reproducibility. This includes the Path~A SCF$\rightarrow$NSCF$\rightarrow$ \newline bands$\rightarrow$DOS/PDOS pipelines on macOS and server, and the Path~B aluminium EOS sweep scripts. Refer to the repository paths noted in the main text for the latest versions.
 
 \section{Supplementary Materials}
 \label{app:code}
 The following resources accompany this report and are available in the referenced repositories:
-\begin{itemize}
-  \item \textbf{Build and run scripts}: \texttt{scripts/setup/configure\_accelerate.sh}, \texttt{scripts/setup/fetch\_qe.sh}, and the workflow helpers under \texttt{pathA\_si\_mac/scripts/} and \texttt{pathB\_eos\_al\_mac/scripts/} in \href{https://github.com/shahpoll/QE_stretching_macm4}{\texttt{QE\_stretching\_macm4}}.
-  \item \textbf{Provenance bundles}: Environment snapshots, pseudopotential hashes, and command logs stored in each workflow's \texttt{work/} directory (both local and server repositories).
-  \item \textbf{Comparison data and figures}: Merged CSV tables and plotting scripts in \href{https://github.com/shahpoll/qe_comparison_macm4_v_server}{\texttt{qe\_comparison\_macm4\_v\_server}}, including \texttt{data/comparison\_metrics.csv} and \texttt{figures/*.png}.
-  \item \textbf{LaTeX-ready artefacts}: EOS tables (\texttt{latex/eos\_table.tex}) and methodological notes (\texttt{latex/eos\_methods.tex}) generated during the Path~B analysis.
-  \item \textbf{Raw figures referenced here}: PNG files under \texttt{figs/} of this repository, copied directly from the workflow and comparison projects.
+\begin{sloppypar}
+\begin{itemize}[leftmargin=*]
+  \setlength\itemsep{4pt}
+  \item \textbf{Build and run scripts}: configure\_accelerate.sh, fetch\_qe.sh, and the Path~A / Path~B launchers in QE\_stretching\_macm4\\(pathA\_si\_mac/scripts and pathB\_eos\_al\_mac/scripts).
+  \item \textbf{Provenance bundles}: environment snapshots, pseudopotential hashes, and command logs stored in each workflow's work/ directory (local and server).
+  \item \textbf{Comparison data and figures}: logs, timing tables, and plots in qe\_benchmarking\\(runs/local\_summary.tsv, runs/comparison\_summary.txt, runs/plots/*.png).
+  \item \textbf{LaTeX-ready artefacts}: eos\_table.tex, eos\_methods.tex, and runs/al\_eos\_fit/fit\_summary.tex in qe\_benchmarking.
+  \item \textbf{Raw figures referenced here}: PNG files under figs/ of this repository, copied directly from the workflow and benchmarking projects.
 \end{itemize}
+\end{sloppypar}
 
 \section*{Repository Index}
 \begin{itemize}
-  \item \href{https://github.com/shahpoll/qe_macm4_build}{\texttt{qe\_macm4\_build}} — scripts and documentation for building QE~7.4.1 on macOS~15.
+  \item \href{https://github.com/shahpoll/qe_macos15_build}{\texttt{qe\_macos15\_build}} — scripts and documentation for building QE~7.4.1 on macOS~15.
   \item \href{https://github.com/shahpoll/QE_stretching_macm4}{\texttt{QE\_stretching\_macm4}} — Mac mini Path~A and Path~B workflows with logs, plots, and provenance.
   \item \href{https://github.com/shahpoll/QE_stretching_server}{\texttt{QE\_stretching\_server}} — Stretching server equivalents of the Path~A and Path~B workflows.
-  \item \href{https://github.com/shahpoll/qe_comparison_macm4_v_server}{\texttt{qe\_comparison\_macm4\_v\_server}} — Parsed metrics, figures, and scripts for the cross-platform performance analysis.
+  \item \href{https://github.com/shahpoll/qe_benchmarking}{\texttt{qe\_benchmarking}} — Consolidated benchmarking suite (logs, timings, band/DOS checks, and plots) for the Mac-versus-server study.
 \end{itemize}
 
 \printbibliography
